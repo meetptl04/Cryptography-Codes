@@ -1,0 +1,591 @@
+##### CaesarCipher
+
+
+def caesar(text, shift, mode='encrypt'):
+    result = ""
+    for char in text:
+        if char.isalpha():
+            base = ord('a') if char.islower() else ord('A')
+            # If decrypting, reverse the shift
+            s = shift if mode == 'encrypt' else -shift
+            result += chr((ord(char) - base + s) % 26 + base)
+        else:
+            result += char
+    return result
+
+
+if __name__ == "__main__":
+    shift = 3
+
+    print("Select an option:\n1. Encrypt a message\n2. Decrypt a message")
+    choice = int(input())
+
+    if choice in [1, 2]:
+        mode = 'encrypt' if choice == 1 else 'decrypt'
+        text = input(f"Enter the text to be {mode}ed:\n")
+        result = caesar(text, shift, mode)
+        print(f"{mode.capitalize()}ed Text:", result)
+    else:
+        print("Invalid option. Please select 1 or 2.")
+
+
+
+
+##  HillCipher
+
+
+
+def hill_cipher(message, key):
+    # Create key matrix (3x3)
+    key_matrix = [[ord(key[3 * i + j]) % 65 for j in range(3)] for i in range(3)]
+
+    # Create message vector (3x1)
+    message_vector = [[ord(message[i]) % 65] for i in range(3)]
+
+    # Encrypt
+    cipher_matrix = [[0] for _ in range(3)]
+    for i in range(3):
+        for j in range(3):
+            cipher_matrix[i][0] += key_matrix[i][j] * message_vector[j][0]
+        cipher_matrix[i][0] %= 26
+
+    # Convert to text
+    return ''.join(chr(cipher_matrix[i][0] + 65) for i in range(3))
+
+
+if __name__ == "__main__":
+    message = input("Enter the message (3 characters): ").upper()
+    key = input("Enter the key (9 characters): ").upper()
+    print("Ciphertext:", hill_cipher(message, key))
+
+
+#####  PlayfairCipher
+
+
+
+# def generate_key_matrix(key):
+#     key_matrix = [['' for _ in range(5)] for _ in range(5)]
+#     used = [False] * 26
+#
+#     # Replace J with I in the key
+#     key = key.upper().replace('J', 'I')
+#
+#     # Build key string without duplicates
+#     key_string = ""
+#     for c in key:
+#         if c.isalpha() and not used[ord(c) - ord('A')]:
+#             key_string += c
+#             used[ord(c) - ord('A')] = True
+#
+#     # Add remaining alphabet
+#     for c in range(ord('A'), ord('Z') + 1):
+#         if chr(c) != 'J' and not used[c - ord('A')]:
+#             key_string += chr(c)
+#
+#     # Fill the matrix
+#     for i in range(25):
+#         key_matrix[i // 5][i % 5] = key_string[i]
+#
+#     return key_matrix
+#
+#
+# def find_position(matrix, char):
+#     for i in range(5):
+#         for j in range(5):
+#             if matrix[i][j] == char:
+#                 return [i, j]
+#     return None
+#
+#
+# def prepare_text(text):
+#     text = ''.join(c for c in text.upper().replace('J', 'I') if c.isalpha())
+#     result = ""
+#     i = 0
+#
+#     while i < len(text):
+#         if i + 1 < len(text) and text[i] == text[i + 1]:
+#             result += text[i] + 'X'
+#             i += 1
+#         else:
+#             result += text[i]
+#             i += 1
+#
+#     # Add padding if needed
+#     if len(result) % 2 != 0:
+#         result += 'X'
+#
+#     return result
+#
+#
+# def encrypt(plaintext, key_matrix):
+#     plaintext = prepare_text(plaintext)
+#     ciphertext = ""
+#
+#     for i in range(0, len(plaintext), 2):
+#         a, b = plaintext[i], plaintext[i + 1]
+#         pos_a = find_position(key_matrix, a)
+#         pos_b = find_position(key_matrix, b)
+#
+#         if pos_a[0] == pos_b[0]:  # Same row
+#             ciphertext += key_matrix[pos_a[0]][(pos_a[1] + 1) % 5]
+#             ciphertext += key_matrix[pos_b[0]][(pos_b[1] + 1) % 5]
+#         elif pos_a[1] == pos_b[1]:  # Same column
+#             ciphertext += key_matrix[(pos_a[0] + 1) % 5][pos_a[1]]
+#             ciphertext += key_matrix[(pos_b[0] + 1) % 5][pos_b[1]]
+#         else:  # Rectangle
+#             ciphertext += key_matrix[pos_a[0]][pos_b[1]]
+#             ciphertext += key_matrix[pos_b[0]][pos_a[1]]
+#
+#     return ciphertext
+#
+#
+# def decrypt(ciphertext, key_matrix):
+#     plaintext = ""
+#
+#     for i in range(0, len(ciphertext), 2):
+#         a, b = ciphertext[i], ciphertext[i + 1]
+#         pos_a = find_position(key_matrix, a)
+#         pos_b = find_position(key_matrix, b)
+#
+#         if pos_a[0] == pos_b[0]:  # Same row
+#             plaintext += key_matrix[pos_a[0]][(pos_a[1] - 1) % 5]
+#             plaintext += key_matrix[pos_b[0]][(pos_b[1] - 1) % 5]
+#         elif pos_a[1] == pos_b[1]:  # Same column
+#             plaintext += key_matrix[(pos_a[0] - 1) % 5][pos_a[1]]
+#             plaintext += key_matrix[(pos_b[0] - 1) % 5][pos_b[1]]
+#         else:  # Rectangle
+#             plaintext += key_matrix[pos_a[0]][pos_b[1]]
+#             plaintext += key_matrix[pos_b[0]][pos_a[1]]
+#
+#     return plaintext.replace('X', '')
+#
+#
+# def main():
+#     print("Enter the key for the Playfair Cipher:")
+#     key = input()
+#     key_matrix = generate_key_matrix(key)
+#
+#     print("Select an option:")
+#     print("1. Encrypt a message")
+#     print("2. Decrypt a message")
+#     choice = int(input())
+#
+#     if choice == 1:
+#         print("Enter the plaintext:")
+#         plaintext = input()
+#         ciphertext = encrypt(plaintext, key_matrix)
+#         print("Ciphertext:", ciphertext)
+#     elif choice == 2:
+#         print("Enter the ciphertext:")
+#         ciphertext = input()
+#         plaintext = decrypt(ciphertext, key_matrix)
+#         print("Plaintext:", plaintext)
+#     else:
+#         print("Invalid option. Please select 1 or 2.")
+#
+#
+# if __name__ == "__main__":
+#     main()
+
+
+def playfair_cipher(text, key, mode='encrypt'):
+    # Generate key matrix
+    key = key.upper().replace('J', 'I')
+    key_chars = []
+    for c in key + 'ABCDEFGHIKLMNOPQRSTUVWXYZ':
+        if c.isalpha() and c not in key_chars and c != 'J':
+            key_chars.append(c)
+
+    matrix = [key_chars[i:i + 5] for i in range(0, 25, 5)]
+
+    # Find position function
+    def find_pos(char):
+        for i in range(5):
+            if char in matrix[i]:
+                return i, matrix[i].index(char)
+
+    # Prepare text
+    text = text.upper().replace('J', 'I')
+    text = ''.join(c for c in text if c.isalpha())
+
+    if mode == 'encrypt':
+        i = 0
+        prepared = []
+        while i < len(text):
+            if i == len(text) - 1:
+                prepared.extend([text[i], 'X'])
+                break
+            if text[i] == text[i + 1]:
+                prepared.extend([text[i], 'X'])
+                i += 1
+            else:
+                prepared.extend([text[i], text[i + 1]])
+                i += 2
+        text = ''.join(prepared)
+
+    result = []
+    for i in range(0, len(text), 2):
+        a, b = text[i], text[i + 1] if i + 1 < len(text) else 'X'
+        row_a, col_a = find_pos(a)
+        row_b, col_b = find_pos(b)
+
+        if row_a == row_b:  # Same row
+            shift = 1 if mode == 'encrypt' else -1
+            result.append(matrix[row_a][(col_a + shift) % 5])
+            result.append(matrix[row_b][(col_b + shift) % 5])
+        elif col_a == col_b:  # Same column
+            shift = 1 if mode == 'encrypt' else -1
+            result.append(matrix[(row_a + shift) % 5][col_a])
+            result.append(matrix[(row_b + shift) % 5][col_b])
+        else:  # Rectangle
+            result.append(matrix[row_a][col_b])
+            result.append(matrix[row_b][col_a])
+
+    return ''.join(result)
+
+
+if __name__ == "__main__":
+    print("Enter the key for the Playfair Cipher:")
+    key = input()
+
+    print("Select an option:\n1. Encrypt\n2. Decrypt")
+    choice = int(input())
+
+    mode = 'encrypt' if choice == 1 else 'decrypt'
+    operation = 'plaintext' if choice == 1 else 'ciphertext'
+
+    print(f"Enter the {operation}:")
+    text = input()
+
+    result = playfair_cipher(text, key, mode)
+    print(f"{'Cipher' if choice == 1 else 'Plain'}text:", result)
+
+
+
+
+##### RailFenceCipher
+
+# def rail_fence_cipher(text, rails, mode='encrypt'):
+#     # Create the rail fence pattern
+#     fence = [['\n' for _ in range(len(text))] for _ in range(rails)]
+#
+#     # Mark the rail pattern with placeholders
+#     row, down = 0, True
+#     for i in range(len(text)):
+#         fence[row][i] = '*' if mode == 'decrypt' else text[i]
+#         if row == 0:
+#             down = True
+#         if row == rails - 1:
+#             down = False
+#         row = row + 1 if down else row - 1
+#
+#     if mode == 'encrypt':
+#         # Read off the fence
+#         result = ''.join(char for rail in fence for char in rail if char != '\n')
+#     else:  # decrypt
+#         # Fill the fence with ciphertext
+#         index = 0
+#         for i in range(rails):
+#             for j in range(len(text)):
+#                 if fence[i][j] == '*':
+#                     fence[i][j] = text[index]
+#                     index += 1
+#
+#         # Read off in zigzag pattern
+#         result = ''
+#         row, down = 0, True
+#         for i in range(len(text)):
+#             result += fence[row][i]
+#             if row == 0:
+#                 down = True
+#             if row == rails - 1:
+#                 down = False
+#             row = row + 1 if down else row - 1
+#
+#     return result
+#
+#
+# if __name__ == "__main__":
+#     print("Rail Fence Cipher")
+#     print("Choose an option:")
+#     print("1. Encrypt")
+#     print("2. Decrypt")
+#     choice = int(input())
+#
+#     rails = int(input("Enter the number of rails: "))
+#
+#     if choice == 1:
+#         plaintext = input("Enter the plaintext: ")
+#         ciphertext = rail_fence_cipher(plaintext, rails, 'encrypt')
+#         print("Encrypted text:", ciphertext)
+#     elif choice == 2:
+#         ciphertext = input("Enter the ciphertext: ")
+#         plaintext = rail_fence_cipher(ciphertext, rails, 'decrypt')
+#         print("Decrypted text:", plaintext)
+#     else:
+#         print("Invalid choice.")
+
+
+def rail_fence(text, rails, decrypt=False):
+    # Create zigzag pattern indices
+    pattern = []
+    r, step = 0, 1
+    for i in range(len(text)):
+        pattern.append(r)
+        r += step
+        if r == 0 or r == rails - 1:
+            step = -step
+
+    if decrypt:
+        # For decryption
+        result = [''] * len(text)
+        index = 0
+        # Read off in rail order
+        for r in range(rails):
+            for i, pos in enumerate(pattern):
+                if pos == r:
+                    result[i] = text[index]
+                    index += 1
+        return ''.join(result)
+    else:
+        # For encryption
+        fence = [[] for _ in range(rails)]
+        for i, char in enumerate(text):
+            fence[pattern[i]].append(char)
+        return ''.join(sum(fence, []))  # Flatten the fence
+
+
+if __name__ == "__main__":
+    choice = int(input("1. Encrypt\n2. Decrypt\nChoice: "))
+    rails = int(input("Rails: "))
+    text = input("Text: ")
+
+    result = rail_fence(text, rails, choice == 2)
+    print(f"{'Decrypted' if choice == 2 else 'Encrypted'} text:", result)
+
+
+
+##### RowTranspositionCipher
+
+
+
+# def row_transposition(text, key, decrypt=False):
+#     columns = len(key)
+#     rows = (len(text) + columns - 1) // columns  # Ceiling division
+#
+#     if not decrypt:  # Encrypt
+#         # Pad the plaintext if needed
+#         padded_text = text + 'X' * (rows * columns - len(text))
+#
+#         # Fill the grid row by row
+#         grid = [['' for _ in range(columns)] for _ in range(rows)]
+#         for i in range(len(padded_text)):
+#             grid[i // columns][i % columns] = padded_text[i]
+#
+#         # Read off by columns according to key
+#         result = ''
+#         for k in key:
+#             col = int(k)
+#             for row in range(rows):
+#                 result += grid[row][col]
+#
+#         return result
+#
+#     else:  # Decrypt
+#         # Create empty grid
+#         grid = [['' for _ in range(columns)] for _ in range(rows)]
+#
+#         # Fill the grid column by column according to key
+#         index = 0
+#         for k in key:
+#             col = int(k)
+#             for row in range(rows):
+#                 if index < len(text):
+#                     grid[row][col] = text[index]
+#                     index += 1
+#
+#         # Read off row by row
+#         result = ''
+#         for row in grid:
+#             result += ''.join(row)
+#
+#         # Remove padding if any
+#         return result.replace('X', '')
+#
+#
+# if __name__ == "__main__":
+#     print("Row Transposition Cipher")
+#     print("Choose an option:")
+#     print("1. Encrypt")
+#     print("2. Decrypt")
+#     choice = int(input())
+#
+#     key = input("Enter the key (numeric string): ")
+#
+#     if choice == 1:
+#         plaintext = input("Enter the plaintext: ")
+#         ciphertext = row_transposition(plaintext, key)
+#         print("Encrypted text:", ciphertext)
+#     elif choice == 2:
+#         ciphertext = input("Enter the ciphertext: ")
+#         plaintext = row_transposition(ciphertext, key, decrypt=True)
+#         print("Decrypted text:", plaintext)
+#     else:
+#         print("Invalid choice.")
+
+
+def row_transposition(text, key, decrypt=False):
+    columns = len(key)
+    rows = (len(text) + columns - 1) // columns
+
+    if not decrypt:  # Encrypt
+        # Pad text and create grid
+        text = text.ljust(rows * columns, 'X')
+        grid = [text[i:i + columns] for i in range(0, len(text), columns)]
+
+        # Read off by columns according to key
+        return ''.join(grid[r][int(k)] for k in key for r in range(rows))
+
+    else:  # Decrypt
+        # Create empty grid
+        grid = [['' for _ in range(columns)] for _ in range(rows)]
+
+        # Fill grid by columns according to key
+        index = 0
+        for k in key:
+            col = int(k)
+            for row in range(rows):
+                if index < len(text):
+                    grid[row][col] = text[index]
+                    index += 1
+
+        # Read grid row by row and remove padding
+        return ''.join(''.join(row) for row in grid).rstrip('X')
+
+
+if __name__ == "__main__":
+    choice = int(input("1. Encrypt\n2. Decrypt\nChoice: "))
+    key = input("Key (numeric): ")
+    text = input("Text: ")
+
+    result = row_transposition(text, key, choice == 2)
+    print(f"Result: {result}")
+
+
+
+
+##### VigenereCipher
+
+
+# def encrypt(plaintext, key):
+#     ciphertext = ""
+#     key_index = 0
+#
+#     for i in range(len(plaintext)):
+#         plaintext_char = plaintext[i]
+#         if plaintext_char.isalpha():
+#             key_char = key[key_index % len(key)]
+#             shift = ord(key_char.upper()) - ord('A')
+#
+#             if plaintext_char.isupper():
+#                 encrypted_char = chr(
+#                     ((ord(plaintext_char) - ord('A') + shift) % 26) + ord('A'))
+#                 ciphertext += encrypted_char
+#             else:
+#                 encrypted_char = chr(
+#                     ((ord(plaintext_char) - ord('a') + shift) % 26) + ord('a'))
+#                 ciphertext += encrypted_char
+#             key_index += 1
+#         else:
+#             ciphertext += plaintext_char
+#
+#     return ciphertext
+#
+#
+# def decrypt(ciphertext, key):
+#     plaintext = ""
+#     key_index = 0
+#
+#     for i in range(len(ciphertext)):
+#         ciphertext_char = ciphertext[i]
+#         if ciphertext_char.isalpha():
+#             key_char = key[key_index % len(key)]
+#             shift = ord(key_char.upper()) - ord('A')
+#
+#             if ciphertext_char.isupper():
+#                 decrypted_char = chr(
+#                     ((ord(ciphertext_char) - ord('A') - shift + 26) % 26) + ord('A'))
+#                 plaintext += decrypted_char
+#             else:
+#                 decrypted_char = chr(
+#                     ((ord(ciphertext_char) - ord('a') - shift + 26) % 26) + ord('a'))
+#                 plaintext += decrypted_char
+#             key_index += 1
+#         else:
+#             plaintext += ciphertext_char
+#
+#     return plaintext
+#
+#
+# def main():
+#     print("Vigenère Cipher")
+#     print("Choose an option:")
+#     print("1. Encrypt")
+#     print("2. Decrypt")
+#     choice = int(input())
+#
+#     key = input("Enter the key: ")
+#
+#     if choice == 1:
+#         plaintext = input("Enter the plaintext: ")
+#         ciphertext = encrypt(plaintext, key)
+#         print("Encrypted text:", ciphertext)
+#     elif choice == 2:
+#         ciphertext = input("Enter the ciphertext: ")
+#         decrypted_text = decrypt(ciphertext, key)
+#         print("Decrypted text:", decrypted_text)
+#     else:
+#         print("Invalid choice.")
+#
+#
+# if __name__ == "__main__":
+#     main()
+
+
+def vigenere(text, key, decrypt=False):
+    result = ""
+    key_idx = 0
+
+    for char in text:
+        if char.isalpha():
+            # Get shift from key
+            shift = ord(key[key_idx % len(key)].upper()) - ord('A')
+            if decrypt:
+                shift = -shift
+
+            # Apply shift based on case
+            base = ord('A') if char.isupper() else ord('a')
+            result += chr((ord(char) - base + shift) % 26 + base)
+            key_idx += 1
+        else:
+            result += char
+
+    return result
+
+
+if __name__ == "__main__":
+    print("Vigenère Cipher")
+    choice = int(input("1. Encrypt\n2. Decrypt\nChoice: "))
+    key = input("Key: ")
+
+    if choice in [1, 2]:
+        text = input(f"{'Plain' if choice == 1 else 'Cipher'}text: ")
+        result = vigenere(text, key, choice == 2)
+        print(f"{'Encrypted' if choice == 1 else 'Decrypted'} text: {result}")
+    else:
+        print("Invalid choice.")
+
+
+
+
+

@@ -1,0 +1,1195 @@
+##### SDES
+
+## sdes.py
+
+class SimplifiedDES:
+    def __init__(self, key=None):
+        self.P10 = [3, 5, 2, 7, 4, 10, 1, 9, 8, 6]
+        self.P8 = [6, 3, 7, 4, 8, 5, 10, 9]
+        self.IP = [2, 6, 3, 1, 4, 8, 5, 7]
+        self.EP = [4, 1, 2, 3, 2, 3, 4, 1]
+        self.P4 = [2, 4, 3, 1]
+        self.IP_inv = [4, 1, 3, 5, 7, 2, 8, 6]
+        self.S0 = [[1, 0, 3, 2], [3, 2, 1, 0], [0, 2, 1, 3], [3, 1, 3, 2]]
+        self.S1 = [[0, 1, 2, 3], [2, 0, 1, 3], [3, 0, 1, 0], [2, 1, 0, 3]]
+        self.key = key if key else [1, 0, 1, 0, 0, 0, 0, 0, 1, 0]
+        self.key1 = []
+        self.key2 = []
+
+    def set_key(self, key):
+        if len(key) != 10:
+            raise ValueError("Key must be a 10-bit binary list.")
+        self.key = key
+
+    def permute(self, bits, table):
+        return [bits[i - 1] for i in table]
+
+    def left_shift(self, bits, shifts):
+        return bits[shifts:] + bits[:shifts]
+
+    def key_generation(self):
+        permuted_key = self.permute(self.key, self.P10)
+        left, right = permuted_key[:5], permuted_key[5:]
+        left, right = self.left_shift(left, 1), self.left_shift(right, 1)
+        self.key1 = self.permute(left + right, self.P8)
+        left, right = self.left_shift(left, 2), self.left_shift(right, 2)
+        self.key2 = self.permute(left + right, self.P8)
+
+    def xor(self, bits1, bits2):
+        return [b1 ^ b2 for b1, b2 in zip(bits1, bits2)]
+
+    def sbox_substitution(self, bits, sbox):
+        row = int(f"{bits[0]}{bits[3]}", 2)
+        col = int(f"{bits[1]}{bits[2]}", 2)
+        return [int(b) for b in f"{sbox[row][col]:02b}"]
+
+    def fk(self, bits, key):
+        left, right = bits[:4], bits[4:]
+        expanded = self.permute(right, self.EP)
+        xor_result = self.xor(expanded, key)
+        left_sbox = self.sbox_substitution(xor_result[:4], self.S0)
+        right_sbox = self.sbox_substitution(xor_result[4:], self.S1)
+        sbox_result = left_sbox + right_sbox
+        p4_result = self.permute(sbox_result, self.P4)
+        return self.xor(left, p4_result) + right
+
+    def encrypt(self, plaintext):
+        initial_permutation = self.permute(plaintext, self.IP)
+        round1 = self.fk(initial_permutation, self.key1)
+        swapped = round1[4:] + round1[:4]
+        round2 = self.fk(swapped, self.key2)
+        return self.permute(round2, self.IP_inv)
+
+    def decrypt(self, ciphertext):
+        initial_permutation = self.permute(ciphertext, self.IP)
+        round1 = self.fk(initial_permutation, self.key2)
+        swapped = round1[4:] + round1[:4]
+        round2 = self.fk(swapped, self.key1)
+        return self.permute(round2, self.IP_inv)
+
+
+
+## sdes_server.py
+
+import socket
+from sdes import SimplifiedDES
+
+# Server setup
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(('localhost', 65432))
+server_socket.listen(1)
+print("Server is listening on port 65432")
+
+# Accept connection
+conn, addr = server_socket.accept()
+print(f"Connection from {addr}")
+
+# Receive client's key choice
+key_choice = conn.recv(1024).decode().strip().lower()
+
+# Set key based on the client's choice
+if key_choice == "no":
+    # If the client wants a custom key, server will wait for it
+    custom_key = conn.recv(1024).decode().strip()
+    key = [int(bit) for bit in custom_key]
+    print(f"Server using custom key from client: {key}")
+else:
+    key = [1, 0, 1, 0, 0, 0, 0, 0, 1, 0]  # Default key
+    print(f"Server using default key: {key}")
+
+# Initialize SDES with the chosen key
+sdes = SimplifiedDES(key)
+sdes.key_generation()
+
+while True:
+    data = conn.recv(1024).decode()
+    if data.lower() == "exit":
+        print("Client has exited the chat.")
+        break
+
+    print(f"Received encrypted text from client: {data}")
+    ciphertext = [int(b) for b in data]
+    decrypted_message = ''.join(map(str, sdes.decrypt(ciphertext)))
+    print(f"Decrypted text: {decrypted_message}")
+
+    server_message = input("You (plaintext): ")
+    if server_message.lower() == "exit":
+        conn.send("exit".encode())
+        print("Exiting the chat.")
+        break
+
+    plaintext = [int(b) for b in server_message]
+    encrypted_response = sdes.encrypt(plaintext)
+    encrypted_response_str = ''.join(map(str, encrypted_response))
+    print(f"Encrypted text to send to client: {encrypted_response_str}")
+    conn.send(encrypted_response_str.encode())
+
+conn.close()
+
+
+
+## sdes_client.py
+
+
+import socket
+from sdes import SimplifiedDES
+
+# Client setup
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket.connect(('localhost', 65432))
+
+print("Type 'exit' to leave the chat.")
+
+# Key setup: client chooses
+key_choice = input("Do you want to use the default key? (yes/no): ").strip().lower()
+
+# Send key choice to server
+client_socket.send(key_choice.encode())
+
+if key_choice == "no":
+    custom_key = input("Enter a 10-bit custom key (e.g., 1010000010): ").strip()
+    client_socket.send(custom_key.encode())
+    print(f"Client using custom key: {custom_key}")
+else:
+    print(f"Client using default key: [1, 0, 1, 0, 0, 0, 0, 0, 1, 0]")
+
+# Initialize SDES with the chosen key (based on the client's choice)
+key = [1, 0, 1, 0, 0, 0, 0, 0, 1, 0] if key_choice == "yes" else [int(b) for b in custom_key]
+sdes = SimplifiedDES(key)
+sdes.key_generation()
+
+while True:
+    client_message = input("You (plaintext): ")
+    if client_message.lower() == "exit":
+        client_socket.send("exit".encode())
+        print("Exiting the chat.")
+        break
+
+    plaintext = [int(b) for b in client_message]
+    encrypted_message = sdes.encrypt(plaintext)
+    encrypted_message_str = ''.join(map(str, encrypted_message))
+    print(f"Encrypted text to send to server: {encrypted_message_str}")
+    client_socket.send(encrypted_message_str.encode())
+
+    data = client_socket.recv(1024).decode()
+    if data.lower() == "exit":
+        print("Server has exited the chat.")
+        break
+
+    print(f"Received encrypted text from server: {data}")
+    ciphertext = [int(b) for b in data]
+    decrypted_response = ''.join(map(str, sdes.decrypt(ciphertext)))
+    print(f"Decrypted text: {decrypted_response}")
+
+client_socket.close()
+
+
+
+
+
+##### DES
+
+
+## des.py
+
+# Function to convert hex to binary
+def hex2bin(s):
+    mp = {'0': "0000", '1': "0001", '2': "0010", '3': "0011",
+          '4': "0100", '5': "0101", '6': "0110", '7': "0111",
+          '8': "1000", '9': "1001", 'A': "1010", 'B': "1011",
+          'C': "1100", 'D': "1101", 'E': "1110", 'F': "1111"}
+    bin_str = ""
+    for char in s:
+        bin_str += mp[char]
+    return bin_str
+
+# Function to convert binary to hex
+def bin2hex(s):
+    mp = {"0000": '0', "0001": '1', "0010": '2', "0011": '3',
+          "0100": '4', "0101": '5', "0110": '6', "0111": '7',
+          "1000": '8', "1001": '9', "1010": 'A', "1011": 'B',
+          "1100": 'C', "1101": 'D', "1110": 'E', "1111": 'F'}
+    hex_str = ""
+    for i in range(0, len(s), 4):
+        hex_str += mp[s[i:i + 4]]
+    return hex_str
+
+# Function to permute bits
+def permute(k, arr, n):
+    permutation = ""
+    for i in range(n):
+        permutation += k[arr[i] - 1]
+    return permutation
+
+# Function to perform left shift
+def shift_left(k, nth_shifts):
+    return k[nth_shifts:] + k[:nth_shifts]
+
+# Function to XOR two strings
+def xor(a, b):
+    return "".join(['0' if i == j else '1' for i, j in zip(a, b)])
+
+# S-boxes
+sbox = [
+    [[14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7],
+     [0, 15, 7, 4, 14, 2, 13, 1, 10, 6, 12, 11, 9, 5, 3, 8],
+     [4, 1, 14, 8, 13, 6, 2, 11, 15, 12, 9, 7, 3, 10, 5, 0],
+     [15, 12, 8, 2, 4, 9, 1, 7, 5, 11, 3, 14, 10, 0, 6, 13]],
+    [[15, 1, 8, 14, 6, 11, 3, 4, 9, 7, 2, 13, 12, 0, 5, 10],
+     [3, 13, 4, 7, 15, 2, 8, 14, 12, 0, 1, 10, 6, 9, 11, 5],
+     [0, 14, 7, 11, 10, 4, 13, 1, 5, 8, 12, 6, 9, 3, 2, 15],
+     [13, 8, 10, 1, 3, 15, 4, 2, 11, 6, 7, 12, 0, 5, 14, 9]],
+    [[10, 0, 9, 14, 6, 3, 15, 5, 1, 13, 12, 7, 11, 4, 2, 8],
+     [13, 7, 0, 9, 3, 4, 6, 10, 2, 8, 5, 14, 12, 11, 15, 1],
+     [13, 6, 4, 9, 8, 15, 3, 0, 11, 1, 2, 12, 5, 10, 14, 7],
+     [1, 10, 13, 0, 6, 9, 8, 7, 4, 15, 14, 3, 11, 5, 2, 12]],
+    [[7, 13, 14, 3, 0, 6, 9, 10, 1, 2, 8, 5, 11, 12, 4, 15],
+     [13, 8, 11, 5, 6, 15, 0, 3, 4, 7, 2, 12, 1, 10, 14, 9],
+     [10, 6, 9, 0, 12, 11, 7, 13, 15, 1, 3, 14, 5, 2, 8, 4],
+     [3, 15, 0, 6, 10, 1, 13, 8, 9, 4, 5, 11, 12, 7, 2, 14]],
+    [[2, 12, 4, 1, 7, 10, 11, 6, 8, 5, 3, 15, 13, 0, 14, 9],
+     [14, 11, 2, 12, 4, 7, 13, 1, 5, 0, 15, 10, 3, 9, 8, 6],
+     [4, 2, 1, 11, 10, 13, 7, 8, 15, 9, 12, 5, 6, 3, 0, 14],
+     [11, 8, 12, 7, 1, 14, 2, 13, 6, 15, 0, 9, 10, 4, 5, 3]],
+    [[12, 1, 10, 15, 9, 2, 6, 8, 0, 13, 3, 4, 14, 7, 5, 11],
+     [10, 15, 4, 2, 7, 12, 9, 5, 6, 1, 13, 14, 0, 11, 3, 8],
+     [9, 14, 15, 5, 2, 8, 12, 3, 7, 0, 4, 10, 1, 13, 11, 6],
+     [4, 3, 2, 12, 9, 5, 15, 10, 11, 14, 1, 7, 6, 0, 8, 13]],
+    [[4, 11, 2, 14, 15, 0, 8, 13, 3, 12, 9, 7, 5, 10, 6, 1],
+     [13, 0, 11, 7, 4, 9, 1, 10, 14, 3, 5, 12, 2, 15, 8, 6],
+     [1, 4, 11, 13, 12, 3, 7, 14, 10, 15, 6, 8, 0, 5, 9, 2],
+     [6, 11, 13, 8, 1, 4, 10, 7, 9, 5, 0, 15, 14, 2, 3, 12]],
+    [[13, 2, 8, 4, 6, 15, 11, 1, 10, 9, 3, 14, 5, 0, 12, 7],
+     [1, 15, 13, 8, 10, 3, 7, 4, 12, 5, 6, 11, 0, 14, 9, 2],
+     [7, 11, 4, 1, 9, 12, 14, 2, 0, 6, 10, 13, 15, 3, 5, 8],
+     [2, 1, 14, 7, 4, 10, 8, 13, 15, 12, 9, 0, 3, 5, 6, 11]]
+]
+
+# Function to generate keys
+def generate_keys(key):
+    key = hex2bin(key)
+
+    # Permuted Choice 1 (PC-1)
+    pc1 = [57, 49, 41, 33, 25, 17, 9,
+           1, 58, 50, 42, 34, 26, 18,
+           10, 2, 59, 51, 43, 35, 27,
+           19, 11, 3, 60, 52, 44, 36,
+           63, 55, 47, 39, 31, 23, 15,
+           7, 62, 54, 46, 38, 30, 22,
+           14, 6, 61, 53, 45, 37, 29,
+           21, 13, 5, 28, 20, 12, 4]
+
+    # Permuted Choice 2 (PC-2)
+    pc2 = [14, 17, 11, 24, 1, 5,
+           3, 28, 15, 6, 21, 10,
+           23, 19, 12, 4, 26, 8,
+           16, 7, 27, 20, 13, 2,
+           41, 52, 31, 37, 47, 55,
+           30, 40, 51, 45, 33, 48,
+           44, 49, 39, 56, 34, 53,
+           46, 42, 50, 36, 29, 32]
+
+    # Key schedule shift table
+    shift_table = [1, 1, 2, 2, 2, 2, 2, 2,
+                   1, 2, 2, 2, 2, 2, 2, 1]
+
+    # Perform PC-1
+    key = permute(key, pc1, 56)
+
+    # Split the key into left and right halves
+    left = key[:28]
+    right = key[28:]
+
+    round_keys = []
+    for i in range(16):
+        # Perform left shifts
+        left = shift_left(left, shift_table[i])
+        right = shift_left(right, shift_table[i])
+
+        # Combine halves and apply PC-2 to generate each round key
+        combined = left + right
+        round_keys.append(permute(combined, pc2, 48))
+
+    return round_keys
+
+# Encryption function
+def encrypt(pt, rkb):
+    # Initial Permutation (IP)
+    ip = [58, 50, 42, 34, 26, 18, 10, 2,
+          60, 52, 44, 36, 28, 20, 12, 4,
+          62, 54, 46, 38, 30, 22, 14, 6,
+          64, 56, 48, 40, 32, 24, 16, 8,
+          57, 49, 41, 33, 25, 17, 9, 1,
+          59, 51, 43, 35, 27, 19, 11, 3,
+          61, 53, 45, 37, 29, 21, 13, 5,
+          63, 55, 47, 39, 31, 23, 15, 7]
+
+    # Final Permutation (FP)
+    fp = [40, 8, 48, 16, 56, 24, 64, 32,
+          39, 7, 47, 15, 55, 23, 63, 31,
+          38, 6, 46, 14, 54, 22, 62, 30,
+          37, 5, 45, 13, 53, 21, 61, 29,
+          36, 4, 44, 12, 52, 20, 60, 28,
+          35, 3, 43, 11, 51, 19, 59, 27,
+          34, 2, 42, 10, 50, 18, 58, 26,
+          33, 1, 41, 9, 49, 17, 57, 25]
+
+    # Expansion Table
+    exp_d = [32, 1, 2, 3, 4, 5, 4, 5,
+             6, 7, 8, 9, 8, 9, 10, 11,
+             12, 13, 12, 13, 14, 15, 16, 17,
+             16, 17, 18, 19, 20, 21, 20, 21,
+             22, 23, 24, 25, 24, 25, 26, 27,
+             28, 29, 28, 29, 30, 31, 32, 1]
+
+    # Straight Permutation Table
+    per = [16, 7, 20, 21,
+           29, 12, 28, 17,
+           1, 15, 23, 26,
+           5, 18, 31, 10,
+           2, 8, 24, 14,
+           32, 27, 3, 9,
+           19, 13, 30, 6,
+           22, 11, 4, 25]
+
+    # Convert plaintext to binary and perform IP
+    pt = hex2bin(pt)
+    pt = permute(pt, ip, 64)
+
+    # Split plaintext into left and right halves
+    left = pt[:32]
+    right = pt[32:]
+    print(f"Initial L0: {bin2hex(left)}, R0: {bin2hex(right)}")
+    # Perform 16 rounds
+    for i in range(16):
+        # Expand the right half using expansion table
+        right_expanded = permute(right, exp_d, 48)
+
+        # XOR with round key
+        x = xor(right_expanded, rkb[i])
+
+        # S-box substitution
+        sbox_str = ""
+        for j in range(8):
+            row = int(x[j * 6] + x[j * 6 + 5], 2)
+            col = int(x[j * 6 + 1:j * 6 + 5], 2)
+            val = sbox[j][row][col]
+            sbox_str += bin(val)[2:].zfill(4)
+
+        # Straight permutation
+        sbox_str = permute(sbox_str, per, 32)
+
+        # XOR with left half and swap
+        result = xor(left, sbox_str)
+        left = right
+        right = result
+        print(f"Round {i + 1}: L{i + 1}: {bin2hex(left)}, R{i + 1}: {bin2hex(right)}")
+
+    # Combine halves and apply FP
+    combined = right + left
+    cipher_text = permute(combined, fp, 64)
+
+    return bin2hex(cipher_text)
+
+# Main DES function
+def des_encrypt(plaintext, key):
+    # Generate round keys
+    round_keys = generate_keys(key)
+
+    # Encrypt the plaintext
+    cipher_text = encrypt(plaintext, round_keys)
+
+    return cipher_text
+
+# Function to decrypt using DES
+def decrypt(ct, rkb):
+    # Initial Permutation (IP)
+    ip = [58, 50, 42, 34, 26, 18, 10, 2,
+          60, 52, 44, 36, 28, 20, 12, 4,
+          62, 54, 46, 38, 30, 22, 14, 6,
+          64, 56, 48, 40, 32, 24, 16, 8,
+          57, 49, 41, 33, 25, 17, 9, 1,
+          59, 51, 43, 35, 27, 19, 11, 3,
+          61, 53, 45, 37, 29, 21, 13, 5,
+          63, 55, 47, 39, 31, 23, 15, 7]
+
+    # Final Permutation (FP)
+    fp = [40, 8, 48, 16, 56, 24, 64, 32,
+          39, 7, 47, 15, 55, 23, 63, 31,
+          38, 6, 46, 14, 54, 22, 62, 30,
+          37, 5, 45, 13, 53, 21, 61, 29,
+          36, 4, 44, 12, 52, 20, 60, 28,
+          35, 3, 43, 11, 51, 19, 59, 27,
+          34, 2, 42, 10, 50, 18, 58, 26,
+          33, 1, 41, 9, 49, 17, 57, 25]
+
+    # Expansion Table
+    exp_d = [32, 1, 2, 3, 4, 5, 4, 5,
+             6, 7, 8, 9, 8, 9, 10, 11,
+             12, 13, 12, 13, 14, 15, 16, 17,
+             16, 17, 18, 19, 20, 21, 20, 21,
+             22, 23, 24, 25, 24, 25, 26, 27,
+             28, 29, 28, 29, 30, 31, 32, 1]
+
+    # Straight Permutation Table
+    per = [16, 7, 20, 21,
+           29, 12, 28, 17,
+           1, 15, 23, 26,
+           5, 18, 31, 10,
+           2, 8, 24, 14,
+           32, 27, 3, 9,
+           19, 13, 30, 6,
+           22, 11, 4, 25]
+
+    # Convert ciphertext to binary and perform IP
+    ct = hex2bin(ct)
+    ct = permute(ct, ip, 64)
+
+    # Split ciphertext into left and right halves
+    left = ct[:32]
+    right = ct[32:]
+    print(f"Initial L0: {bin2hex(left)}, R0: {bin2hex(right)}")
+    # Perform 16 rounds in reverse order
+    for i in range(16):
+        # Expand the right half using expansion table
+        right_expanded = permute(right, exp_d, 48)
+
+        # XOR with round key
+        x = xor(right_expanded, rkb[15 - i])
+
+        # S-box substitution
+        sbox_str = ""
+        for j in range(8):
+            row = int(x[j * 6] + x[j * 6 + 5], 2)
+            col = int(x[j * 6 + 1:j * 6 + 5], 2)
+            val = sbox[j][row][col]
+            sbox_str += bin(val)[2:].zfill(4)
+
+        # Straight permutation
+        sbox_str = permute(sbox_str, per, 32)
+
+        # XOR with left half and swap
+        result = xor(left, sbox_str)
+        left = right
+        right = result
+        print(f"Round {i + 1}: L{i + 1}: {bin2hex(left)}, R{i + 1}: {bin2hex(right)}")
+
+    # Combine halves and apply FP
+    combined = right + left
+    plain_text = permute(combined, fp, 64)
+
+    return bin2hex(plain_text)
+
+
+# Main DES decryption function
+def des_decrypt(ciphertext, key):
+    # Generate round keys
+    round_keys = generate_keys(key)
+
+    # Decrypt the ciphertext
+    plain_text = decrypt(ciphertext, round_keys)
+
+    return plain_text
+
+
+# # Example usage
+# key = "AABB09182736CCDD"  # Example key (16 hex characters)
+# plaintext = "123456ABCD132536"  # Example plaintext (16 hex characters)
+
+# cipher = des_encrypt(plaintext, key)
+# print("Cipher Text: ", cipher)
+
+# decrypted_text = des_decrypt(cipher, key)
+# print("Decrypted Text: ", decrypted_text)
+
+
+
+## des_server.py
+
+
+import socket
+from des import (des_decrypt,des_encrypt)
+s=socket.socket()
+
+s.bind(("localhost",9999))
+
+s.listen(1)
+
+print("Server is listening")
+
+key="AABB09182736CCDD"
+
+while True:
+    c,addr=s.accept()
+    print("Connected with",addr)
+    cypher=c.recv(1024)
+    print("Cypher code recieved from the client: ",cypher.decode())
+    plaintext=des_decrypt(cypher.decode(),key)
+    print("The decyphered plaintext is: ",plaintext)
+
+
+## des_client.py
+
+
+import socket
+from des import (des_decrypt,des_encrypt)
+
+plaintext=input("Enter the plaintext: ")
+c=socket.socket()
+
+c.connect(('localhost',9999))
+
+key="AABB09182736CCDD"
+
+cypher=des_encrypt(plaintext,key)
+print("Encrypted text on client side is: ",cypher)
+c.send(bytes(cypher,"utf-8"))
+
+
+
+
+##### AES
+
+## aes.py
+
+class AES:
+    # S-box lookup table
+    S_BOX = [
+        0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE,
+        0xD7, 0xAB, 0x76,
+        0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C,
+        0xA4, 0x72, 0xC0,
+        0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71,
+        0xD8, 0x31, 0x15,
+        0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB,
+        0x27, 0xB2, 0x75,
+        0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29,
+        0xE3, 0x2F, 0x84,
+        0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A,
+        0x4C, 0x58, 0xCF,
+        0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50,
+        0x3C, 0x9F, 0xA8,
+        0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10,
+        0xFF, 0xF3, 0xD2,
+        0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64,
+        0x5D, 0x19, 0x73,
+        0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE,
+        0x5E, 0x0B, 0xDB,
+        0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91,
+        0x95, 0xE4, 0x79,
+        0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65,
+        0x7A, 0xAE, 0x08,
+        0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B,
+        0xBD, 0x8B, 0x8A,
+        0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86,
+        0xC1, 0x1D, 0x9E,
+        0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE,
+        0x55, 0x28, 0xDF,
+        0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0,
+        0x54, 0xBB, 0x16
+    ]
+
+    # Inverse S-box lookup table
+    INV_S_BOX = [
+        0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81,
+        0xF3, 0xD7, 0xFB,
+        0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4,
+        0xDE, 0xE9, 0xCB,
+        0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42,
+        0xFA, 0xC3, 0x4E,
+        0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D,
+        0x8B, 0xD1, 0x25,
+        0x72, 0xF8, 0xF6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xD4, 0xA4, 0x5C, 0xCC, 0x5D,
+        0x65, 0xB6, 0x92,
+        0x6C, 0x70, 0x48, 0x50, 0xFD, 0xED, 0xB9, 0xDA, 0x5E, 0x15, 0x46, 0x57, 0xA7,
+        0x8D, 0x9D, 0x84,
+        0x90, 0xD8, 0xAB, 0x00, 0x8C, 0xBC, 0xD3, 0x0A, 0xF7, 0xE4, 0x58, 0x05, 0xB8,
+        0xB3, 0x45, 0x06,
+        0xD0, 0x2C, 0x1E, 0x8F, 0xCA, 0x3F, 0x0F, 0x02, 0xC1, 0xAF, 0xBD, 0x03, 0x01,
+        0x13, 0x8A, 0x6B,
+        0x3A, 0x91, 0x11, 0x41, 0x4F, 0x67, 0xDC, 0xEA, 0x97, 0xF2, 0xCF, 0xCE, 0xF0,
+        0xB4, 0xE6, 0x73,
+        0x96, 0xAC, 0x74, 0x22, 0xE7, 0xAD, 0x35, 0x85, 0xE2, 0xF9, 0x37, 0xE8, 0x1C,
+        0x75, 0xDF, 0x6E,
+        0x47, 0xF1, 0x1A, 0x71, 0x1D, 0x29, 0xC5, 0x89, 0x6F, 0xB7, 0x62, 0x0E, 0xAA,
+        0x18, 0xBE, 0x1B,
+        0xFC, 0x56, 0x3E, 0x4B, 0xC6, 0xD2, 0x79, 0x20, 0x9A, 0xDB, 0xC0, 0xFE, 0x78,
+        0xCD, 0x5A, 0xF4,
+        0x1F, 0xDD, 0xA8, 0x33, 0x88, 0x07, 0xC7, 0x31, 0xB1, 0x12, 0x10, 0x59, 0x27,
+        0x80, 0xEC, 0x5F,
+        0x60, 0x51, 0x7F, 0xA9, 0x19, 0xB5, 0x4A, 0x0D, 0x2D, 0xE5, 0x7A, 0x9F, 0x93,
+        0xC9, 0x9C, 0xEF,
+        0xA0, 0xE0, 0x3B, 0x4D, 0xAE, 0x2A, 0xF5, 0xB0, 0xC8, 0xEB, 0xBB, 0x3C, 0x83,
+        0x53, 0x99, 0x61,
+        0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55,
+        0x21, 0x0C, 0x7D
+    ]
+
+    # Round constant
+    RCON = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36]
+
+    def __init__(self):
+        self.key_schedule = None
+
+    @staticmethod
+    def galois_mult(a: int, b: int) -> int:
+        """Helper method for Galois Field multiplication"""
+        p = 0
+        for _ in range(8):
+            if b & 1:
+                p ^= a
+            hi_bit_set = a & 0x80
+            a = (a << 1) & 0xFF
+            if hi_bit_set:
+                a ^= 0x1b
+            b >>= 1
+        return p
+
+    def sub_bytes(self, state: bytearray) -> bytearray:
+        """Apply S-box substitution to each byte in state"""
+        for i in range(len(state)):
+            state[i] = self.S_BOX[state[i]]
+        return state
+
+    def inv_sub_bytes(self, state: bytearray) -> bytearray:
+        """Apply inverse S-box substitution to each byte in state"""
+        for i in range(len(state)):
+            state[i] = self.INV_S_BOX[state[i]]
+        return state
+
+    def shift_rows(self, state: bytearray) -> bytearray:
+        """Shift rows of state array"""
+        temp = bytearray(state)
+        # Second row
+        temp[1], temp[5], temp[9], temp[13] = state[5], state[9], state[13], state[1]
+        # Third row
+        temp[2], temp[6], temp[10], temp[14] = state[10], state[14], state[2], state[6]
+        # Fourth row
+        temp[3], temp[7], temp[11], temp[15] = state[15], state[3], state[7], state[11]
+        return temp
+
+    def inv_shift_rows(self, state: bytearray) -> bytearray:
+        """Inverse shift rows of state array"""
+        temp = bytearray(state)
+        # Second row
+        temp[5], temp[9], temp[13], temp[1] = state[1], state[5], state[9], state[13]
+        # Third row
+        temp[10], temp[14], temp[2], temp[6] = state[2], state[6], state[10], state[14]
+        # Fourth row
+        temp[15], temp[3], temp[7], temp[11] = state[3], state[7], state[11], state[15]
+        return temp
+
+    def mix_columns(self, state: bytearray) -> bytearray:
+        """Mix columns transformation"""
+        temp = bytearray(16)
+        for i in range(4):
+            s0 = state[i * 4]
+            s1 = state[i * 4 + 1]
+            s2 = state[i * 4 + 2]
+            s3 = state[i * 4 + 3]
+
+            temp[i * 4] = self.galois_mult(s0, 2) ^ self.galois_mult(s1, 3) ^ s2 ^ s3
+            temp[i * 4 + 1] = s0 ^ self.galois_mult(s1, 2) ^ self.galois_mult(s2,
+                                                                              3) ^ s3
+            temp[i * 4 + 2] = s0 ^ s1 ^ self.galois_mult(s2, 2) ^ self.galois_mult(s3,
+                                                                                   3)
+            temp[i * 4 + 3] = self.galois_mult(s0, 3) ^ s1 ^ s2 ^ self.galois_mult(s3,
+                                                                                   2)
+        return temp
+
+    def inv_mix_columns(self, state: bytearray) -> bytearray:
+        """Inverse mix columns transformation"""
+        temp = bytearray(16)
+        for i in range(4):
+            s0 = state[i * 4]
+            s1 = state[i * 4 + 1]
+            s2 = state[i * 4 + 2]
+            s3 = state[i * 4 + 3]
+
+            temp[i * 4] = (self.galois_mult(s0, 0x0e) ^ self.galois_mult(s1, 0x0b) ^
+                           self.galois_mult(s2, 0x0d) ^ self.galois_mult(s3, 0x09))
+            temp[i * 4 + 1] = (self.galois_mult(s0, 0x09) ^ self.galois_mult(s1, 0x0e) ^
+                               self.galois_mult(s2, 0x0b) ^ self.galois_mult(s3, 0x0d))
+            temp[i * 4 + 2] = (self.galois_mult(s0, 0x0d) ^ self.galois_mult(s1, 0x09) ^
+                               self.galois_mult(s2, 0x0e) ^ self.galois_mult(s3, 0x0b))
+            temp[i * 4 + 3] = (self.galois_mult(s0, 0x0b) ^ self.galois_mult(s1, 0x0d) ^
+                               self.galois_mult(s2, 0x09) ^ self.galois_mult(s3, 0x0e))
+        return temp
+
+    def add_round_key(self, state: bytearray, round_key: bytes) -> None:
+        """Add round key to state"""
+        for i in range(16):
+            state[i] ^= round_key[i]
+
+    def generate_key_schedule(self, key: bytes) -> list:
+        """Generate key schedule for all rounds"""
+        w = [[0] * 4 for _ in range(44)]
+
+        # First round key is the key itself
+        for i in range(4):
+            for j in range(4):
+                w[i][j] = key[i * 4 + j]
+
+        # Generate the rest of the round keys
+        for i in range(4, 44):
+            temp = w[i - 1].copy()
+
+            if i % 4 == 0:
+                # RotWord
+                temp = temp[1:] + [temp[0]]
+
+                # SubWord
+                for j in range(4):
+                    temp[j] = self.S_BOX[temp[j]]
+
+                # XOR with RCON
+                temp[0] ^= self.RCON[i // 4 - 1]
+
+            for j in range(4):
+                w[i][j] = w[i - 4][j] ^ temp[j]
+
+        return w
+
+    def get_round_key(self, round: int) -> bytes:
+        """Get round key from key schedule"""
+        round_key = bytearray(16)
+        for i in range(4):
+            for j in range(4):
+                round_key[i * 4 + j] = self.key_schedule[round * 4 + i][j]
+        return bytes(round_key)
+
+    def encrypt(self, input_bytes: bytes, key: bytes) -> bytes:
+        """Encrypt a 16-byte block using AES"""
+        if len(input_bytes) != 16 or len(key) != 16:
+            raise ValueError("Input and key must be 16 bytes")
+
+        self.key_schedule = self.generate_key_schedule(key)
+        state = bytearray(input_bytes)
+
+        # Initial round
+        self.add_round_key(state, self.get_round_key(0))
+
+        # Main rounds
+        for round in range(1, 10):
+            state = self.sub_bytes(state)
+            state = self.shift_rows(state)
+            state = self.mix_columns(state)
+            self.add_round_key(state, self.get_round_key(round))
+
+        # Final round (no mixColumns)
+        state = self.sub_bytes(state)
+        state = self.shift_rows(state)
+        self.add_round_key(state, self.get_round_key(10))
+
+        return bytes(state)
+
+    def decrypt(self, input_bytes: bytes, key: bytes) -> bytes:
+        """Decrypt a 16-byte block using AES"""
+        if len(input_bytes) != 16 or len(key) != 16:
+            raise ValueError("Input and key must be 16 bytes")
+
+        self.key_schedule = self.generate_key_schedule(key)
+        state = bytearray(input_bytes)
+
+        # Initial round
+        self.add_round_key(state, self.get_round_key(10))
+        state = self.inv_shift_rows(state)
+        state = self.inv_sub_bytes(state)
+
+        # Main rounds
+        for round in range(9, 0, -1):
+            self.add_round_key(state, self.get_round_key(round))
+            state = self.inv_mix_columns(state)
+            state = self.inv_shift_rows(state)
+            state = self.inv_sub_bytes(state)
+
+        # Final round
+        self.add_round_key(state, self.get_round_key(0))
+
+        return bytes(state)
+
+    @staticmethod
+    def hex_to_bytes(hex_str: str) -> bytes:
+        """Convert hex string to bytes"""
+        return bytes.fromhex(hex_str)
+
+    @staticmethod
+    def bytes_to_hex(data: bytes) -> str:
+        """Convert bytes to hex string"""
+        return data.hex()
+
+#
+# def main():
+#     """Main method to test the implementation"""
+#     try:
+#         # Test vector
+#         key_hex = "000102030405060708090a0b0c0d0e0f"
+#         plaintext_hex = "00112233445566778899aabbccddeeff"
+#
+#         # Create AES instance
+#         aes = AES()
+#
+#         # Convert hex strings to bytes
+#         key = AES.hex_to_bytes(key_hex)
+#         plaintext = AES.hex_to_bytes(plaintext_hex)
+#
+#         # Encrypt
+#         print(f"Original plaintext: {AES.bytes_to_hex(plaintext)}")
+#         ciphertext = aes.encrypt(plaintext, key)
+#         print(f"Encrypted (hex): {AES.bytes_to_hex(ciphertext)}")
+#
+#         # Decrypt
+#         decrypted = aes.decrypt(ciphertext, key)
+#         print(f"Decrypted (hex): {AES.bytes_to_hex(decrypted)}")
+#
+#         # Verify
+#         print(f"Decryption successful: {plaintext == decrypted}")
+#
+#     except Exception as e:
+#         print(f"Error: {str(e)}")
+#         raise
+#
+#
+# # if __name__ == "__main__":
+# #     main()
+
+
+
+## aes_server.py
+
+
+import socket
+import threading
+import pickle
+from aes import AES
+
+PORT = 5000
+SERVER = 'localhost'
+
+
+def handle_client(client_socket, addr, aes_instance):
+    """Handle individual client connection - now only decrypts received ciphertext"""
+    print(f"Client connected: {addr}")
+
+    try:
+        while True:
+            try:
+                # Receive encrypted data and key from client
+                ciphertext = pickle.loads(client_socket.recv(4096))
+                key = pickle.loads(client_socket.recv(4096))
+
+                # Check for exit condition
+                if len(ciphertext) == 0:
+                    break
+
+                # Decrypt the received ciphertext
+                decrypted = aes_instance.decrypt(ciphertext, key)
+                print(f"Decryption completed for client: {addr}")
+
+                # Send decrypted result back to client
+                client_socket.send(pickle.dumps(decrypted))
+
+            except EOFError:
+                break
+            except Exception as e:
+                print(f"Error processing client request: {str(e)}")
+                break
+
+    except Exception as e:
+        print(f"Error handling client: {str(e)}")
+    finally:
+        client_socket.close()
+        print(f"Client disconnected: {addr}")
+
+
+def start_server():
+    """Start the AES server"""
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((SERVER, PORT))
+    server_socket.listen()
+
+    print(f"Server started on port {PORT}")
+
+    # Create a single AES instance to be shared among clients
+    aes_instance = AES()
+
+    try:
+        while True:
+            client_socket, addr = server_socket.accept()
+
+            # Create a new thread for each client
+            thread = threading.Thread(
+                target=handle_client,
+                args=(client_socket, addr, aes_instance)
+            )
+            thread.start()
+            print(f"Active connections: {threading.active_count() - 1}")
+
+    except KeyboardInterrupt:
+        print("\nServer shutting down...")
+    except Exception as e:
+        print(f"Server error: {str(e)}")
+    finally:
+        server_socket.close()
+
+
+if __name__ == "__main__":
+    start_server()
+
+
+## aes_client.py
+
+
+import socket
+import pickle
+from aes import AES
+
+SERVER_ADDRESS = 'localhost'
+SERVER_PORT = 5000
+SAMPLE_KEY = "000102030405060708090a0b0c0d0e0f"
+
+
+def pad_input(input_bytes):
+    """Pad input to 16 bytes"""
+    padded = bytearray(16)
+    for i in range(min(len(input_bytes), 16)):
+        padded[i] = input_bytes[i]
+    return bytes(padded)
+
+
+def main():
+    # Create AES instance for encryption and hex conversion
+    aes = AES()
+
+    try:
+        # Connect to server
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((SERVER_ADDRESS, SERVER_PORT))
+
+        print("Connected to server")
+        print(f"Using sample key: {SAMPLE_KEY}")
+
+        while True:
+            # Get user input
+            user_input = input("\nEnter plaintext (or 'exit' to quit): ")
+
+            if user_input.lower() == 'exit':
+                # Send empty array to signal exit
+                client_socket.send(pickle.dumps(b''))
+                client_socket.send(pickle.dumps(b''))
+                break
+
+            # Prepare the data
+            plaintext = pad_input(user_input.encode())
+            key = aes.hex_to_bytes(SAMPLE_KEY)
+
+            # Encrypt the data
+            encrypted = aes.encrypt(plaintext, key)
+            print(f"\nEncrypted (hex): {aes.bytes_to_hex(encrypted)}")
+
+            # Send encrypted data and key to server
+            client_socket.send(pickle.dumps(encrypted))
+            client_socket.send(pickle.dumps(key))
+
+            # Receive decrypted result from server
+            decrypted = pickle.loads(client_socket.recv(4096))
+
+            # Display results
+            print("Results:")
+            print(f"Original text: {plaintext.decode().strip()}")
+            print(f"Decrypted text (from server): {decrypted.decode().strip()}")
+
+    except ConnectionRefusedError:
+        print("Error: Could not connect to server. Make sure the server is running.")
+    except Exception as e:
+        print(f"Client error: {str(e)}")
+    finally:
+        client_socket.close()
+
+
+if __name__ == "__main__":
+    main()
+
+
+##### DES mode implementation (For this des is same as des just make the capital letter to small into function)
+
+## file_client.py
+
+import socket
+from des import des_encrypt
+from tkinter import filedialog, Tk
+import time
+import sys
+
+start = time.time()
+# Function to convert normal binary data to hexadecimal representation
+def bytes_to_hex(byte_data):
+    return byte_data.hex()
+
+
+# Function to split hex data into 16-character blocks (64-bit DES blocks)
+def split_into_blocks(hex_data, block_size=16):
+    """Splits hex data into fixed-size blocks, padding the last block if necessary."""
+    blocks = [hex_data[i:i + block_size] for i in range(0, len(hex_data), block_size)]
+
+    # Pad last block if it's smaller than BLOCK_SIZE (16 hex chars = 8 bytes)
+    if len(blocks[-1]) < block_size:
+        blocks[-1] = blocks[-1].ljust(block_size, '0')  # Padding with '0'
+
+    return blocks
+
+
+# Function to encrypt file in ECB mode
+def encrypt_ecb_file(file_path, key):
+    encrypted_blocks = []
+
+    with open(file_path, "rb") as file:
+        file_data = file.read()  # Read entire file as bytes
+
+    hex_data = bytes_to_hex(file_data)  # Convert to hex
+    blocks = split_into_blocks(hex_data)  # Split into blocks
+    i = 0
+    for block in blocks:
+        start_time = time.time() # Record the start time
+        encrypted_blocks.append(des_encrypt(str(block), key))  # Encrypt each block
+        end_time = time.time()  # Record the end time
+        time_taken = end_time - start_time  # Calculate the time difference
+        print(f"Time taken to encrypt the block {i} : {time_taken:.10f} seconds")
+        i += 1
+    print(f"Total Time to encrypt the file : {time.time()-start}")
+    return encrypted_blocks
+
+
+# Set up Tkinter file dialog
+root = Tk()
+root.withdraw()
+file_path = filedialog.askopenfilename(title="Select a file to encrypt")
+
+if not file_path:
+    print("No file selected, exiting.")
+    exit()
+
+# key = "AABB09182736CCDD"
+key = "aabb09182736ccdd"
+c = socket.socket()
+c.connect(('localhost', 8080))  # Connect to server
+
+# Encrypt the file in ECB mode
+encrypted_blocks = encrypt_ecb_file(file_path, key)
+
+# Send encrypted blocks
+for encrypted_block in encrypted_blocks:
+    c.send(encrypted_block.encode())  # Ensure bytes format for transmission
+
+# c.send(b"EOF")  # End of File signal
+c.send("EOF".encode())  # Send "EOF" as bytes
+
+print("Encrypted Data : ")
+for encrypted_block in encrypted_blocks:
+    print(f"{encrypted_block}")
+
+# Save encrypted file as normal text
+with open("encrypted_file.txt", "w") as file:
+    for encrypted_block in encrypted_blocks:
+        file.write(encrypted_block)
+
+# Receive decrypted file
+with open("downloaded_decrypted_file.txt", "wb") as download_file:
+    while chunk := c.recv(1024):
+        if chunk == b"EOF":
+            break
+        download_file.write(chunk)
+
+print("Decrypted file downloaded from server.")
+c.close()
+
+sys.exit()
+
+
+
+## file_server.py
+
+
+import socket
+from des import des_decrypt
+import time
+import sys
+
+start = time.time()
+# Function to convert hex string data to bytes
+def hex_to_bytes(hex_data):
+    return bytes.fromhex(hex_data)
+
+# Function to convert decrypted hex data back to normal text
+def hex_to_normal_text(hex_data):
+    # Convert hex string to bytes
+    byte_data = hex_to_bytes(hex_data)
+
+    # Attempt to decode byte data to normal text (assumes UTF-8 encoded text)
+    try:
+        return byte_data.decode('utf-8')
+    except UnicodeDecodeError:
+        print("Error decoding byte data. The content may not be in UTF-8 format.")
+        return byte_data  # Return raw byte data if decoding fails
+
+# Function to decrypt file in ECB mode
+def decrypt_ecb_file(encrypted_blocks, key):
+    decrypted_data = ""
+    i = 0
+    for encrypted_block in encrypted_blocks:
+        start_time = time.time()  # Record the start time
+        decrypted_data += des_decrypt(encrypted_block, key)
+        end_time = time.time()  # Record the end time
+        time_taken = end_time - start_time  # Calculate the time difference
+        print(f"Time taken to decrypt the block {i} : {time_taken:.10f} seconds")
+        i += 1
+    print(f"Total Time to decrypt the file : {time.time()-start}")
+    return decrypted_data
+
+# Set up server to accept client connections
+s = socket.socket()
+s.bind(("localhost", 8080))  # Listen on port 8080
+s.listen(1)
+
+print("Server is listening on port 8080")
+
+# key = "AABB09182736CCDD"  # Shared key for encryption and decryption
+key = "aabb09182736ccdd"
+
+while True:
+    c, addr = s.accept()
+    print(f"Connected with {addr}")
+
+    encrypted_blocks = []
+
+    while True:
+        encrypted_block = c.recv(16)  # Receive exactly 8 bytes per block
+        if encrypted_block == b"EOF":  # End of File signal
+            break
+        encrypted_block = encrypted_block.decode('utf-8')
+        encrypted_blocks.append(encrypted_block)
+
+    # Decrypt the file
+    decrypted_data = decrypt_ecb_file(encrypted_blocks, key)
+
+    # Convert decrypted hex data to normal text
+    decrypted_text = hex_to_normal_text(decrypted_data)
+
+    # Save decrypted file as normal text
+    with open("decrypted_received_file.txt", "w") as file:
+        file.write(decrypted_text)
+
+    print("Decrypted file saved as 'decrypted_received_file.txt'.")
+
+    # Send decrypted file back
+    with open("decrypted_received_file.txt", "rb") as file:
+        while chunk := file.read(1024):
+            c.send(chunk)
+
+    c.close()
+    print("Connection closed.")
+
+    sys.exit()
+
+
+
