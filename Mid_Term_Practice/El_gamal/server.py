@@ -53,15 +53,15 @@ print(f"Server is waiting for connection...")
 # Generate EL_Gamal parameters
 
 q = random.randint(pow(10,20),pow(10,50))
-g = random.randint(2,q)
-key = gen_key(q)
-h = power(g,key,q)
+g = random.randint(2,q) # E1
+key = gen_key(q)  # D
+h = power(g,key,q) # E2
 
 print(f"Generated El_Gamal Parameters : ")
-print(f"g (prime) : {q}")
-print(f"g (generator : primitive root) : {g}")
-print(f"Private key : {key}")
-print(f"Public key : {h}")
+print(f"q (prime) : {q}")
+print(f"g(E1) (generator : primitive root) : {g}")
+print(f"Private key(D) : {key}")
+print(f"Public key(E2) or (h) : {h}")
 
 while True:
     conn , addr = server_socket.accept()

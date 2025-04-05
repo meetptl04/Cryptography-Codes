@@ -71,14 +71,11 @@ def row_transposition(text, key, decrypt=False):
         # Pad text and create grid
         text = text.ljust(rows * columns, 'X')
         grid = [text[i:i + columns] for i in range(0, len(text), columns)]
-
         # Read off by columns according to key
         return ''.join(grid[r][int(k)] for k in key for r in range(rows))
-
     else:  # Decrypt
         # Create empty grid
         grid = [['' for _ in range(columns)] for _ in range(rows)]
-
         # Fill grid by columns according to key
         index = 0
         for k in key:
@@ -87,7 +84,6 @@ def row_transposition(text, key, decrypt=False):
                 if index < len(text):
                     grid[row][col] = text[index]
                     index += 1
-
         # Read grid row by row and remove padding
         return ''.join(''.join(row) for row in grid).rstrip('X')
 
